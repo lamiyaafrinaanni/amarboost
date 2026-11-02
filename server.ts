@@ -241,22 +241,14 @@ class JSONDatabasePool {
 
 
 
-    if (this.data.providers.length === 0) {
       this.data.providers.push({
         id: 1,
-        name: "AmarBoost",
-        url: "https://amarboost.com/api/v2",
-        api_key: "1f21f84e26b1c34dca633efee42bce7f",
-        is_active: 1
-      });
-      this.data.providers.push({
-        id: 2,
         name: "JustAnotherPanel",
         url: "https://justanotherpanel.com/api/v2",
         api_key: "32363638a5d934c4cfddf0ec8d5d493f",
         is_active: 0
       });
-    }
+
 
     if (this.data.settings.length === 0) {
       const defaultSettings = [
@@ -396,6 +388,7 @@ class JSONDatabasePool {
   private executeQuery(sqlStr: string, params: any[] = [], deferSave = false): [any[], any] {
     const sql = sqlStr.trim().replace(/\s+/g, " ");
     const sqlLower = sql.toLowerCase();
+    console.log("[DEBUG] Executing Query:", sql);
 
     try {
       // Handle fast paths
@@ -418,7 +411,7 @@ class JSONDatabasePool {
 
       // 2. SHOW COLUMNS FROM
       if (sqlLower.startsWith("show columns from")) {
-        return [[{ Field: "id" }, { Field: "is_active" }, { Field: "whatsapp_number" }, { Field: "remains" }, { Field: "start_count" }], null];
+        return [[{ Field: "id" }, { Field: "is_active" }, { Field: "whatsapp_number" }, { Field: "remains" }, { Field: "start_count" }, { Field: "note" }, { Field: "rating" }, { Field: "feedback_comment" }], null];
       }
 
       // 3. ALTER TABLE
@@ -572,6 +565,12 @@ class JSONDatabasePool {
 
       // 8. SELECT
       if (sqlLower.startsWith("select")) {
+        // Hardcode active provider lookup to bypass regex issues in JSON DB fallback
+        if (sqlLower === "select * from providers where is_active = 1 limit 1") {
+            const provider = this.data.providers.find((p: any) => p.is_active === 1);
+            return [[provider ? [provider] : []], null];
+        }
+        
         // Special case: orders joined with users
         if (sqlLower.includes("from orders") && sqlLower.includes("join users")) {
           const tableData = this.data.orders || [];
@@ -1010,6 +1009,20 @@ async function initDB() {
         }
       } catch (e) {}
 
+      try {
+        const [ratingCol]: any = await connection.query(`SHOW COLUMNS FROM orders LIKE 'rating'`);
+        if (ratingCol.length === 0) {
+          await connection.query(`ALTER TABLE orders ADD COLUMN rating INT DEFAULT NULL`);
+        }
+      } catch (e) {}
+
+      try {
+        const [feedbackCol]: any = await connection.query(`SHOW COLUMNS FROM orders LIKE 'feedback_comment'`);
+        if (feedbackCol.length === 0) {
+          await connection.query(`ALTER TABLE orders ADD COLUMN feedback_comment TEXT DEFAULT NULL`);
+        }
+      } catch (e) {}
+
       // Ensure missing columns exist in services table (for schema migrations on existing database tables)
       const servicesColumns = [
         { name: 'platform', type: 'VARCHAR(100) DEFAULT NULL' },
@@ -1223,6 +1236,7 @@ const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
 // Helper to get active provider
 async function getActiveProvider() {
   const [rows]: any = await pool.query("SELECT * FROM providers WHERE is_active = 1 LIMIT 1");
+  console.log("[DEBUG] getActiveProvider result:", rows);
   return rows[0];
 }
 
@@ -1400,13 +1414,7 @@ async function callProvider(params: any, providerId?: number | null, suppressErr
     throw new Error("No active provider configured.");
   }
 
-  const isDefaultMockKey = 
-    provider.api_key === "1f21f84e26b1c34dca633efee42bce7f" || 
-    provider.api_key === "32363638a5d934c4cfddf0ec8d5d493f" || 
-    !provider.api_key ||
-    provider.api_key.includes("mock") ||
-    provider.api_key.includes("simulated") ||
-    provider.api_key.includes("placeholder");
+  const isDefaultMockKey = !provider.api_key || provider.api_key.includes("placeholder");
 
   if (isDefaultMockKey) {
     const action = (params.action || "").toLowerCase();
@@ -2363,6 +2371,11 @@ async function syncServices() {
 
       let totalSynced = 0;
       for (const provider of activeProviders) {
+        if (!provider.api_key || provider.api_key === "ENTER_VALID_API_KEY_HERE" || provider.api_key.includes("placeholder")) {
+          console.warn(`[Background Sync Job] Skipping provider ${provider.name} due to invalid or placeholder API key.`);
+          continue;
+        }
+
         console.log(`[Background Sync Job] Syncing services from provider: ${provider.name} (URL: ${provider.url})...`);
         const rawServices = await callProvider({ action: "services" }, provider.id, true);
         if (!Array.isArray(rawServices)) {
@@ -3076,7 +3089,13 @@ async function syncOrderStatuses(userId?: number) {
     // Group API orders by provider_id
     const ordersByProvider: { [key: string]: any[] } = {};
     for (const order of apiOrders) {
-      const pid = order.provider_id ? String(order.provider_id) : "default";
+      // If provider_id is missing, try to get the first active provider
+      let pid = order.provider_id ? String(order.provider_id) : "default";
+      if (pid === "default") {
+        const activeProv = await getActiveProvider();
+        if (activeProv) pid = String(activeProv.id);
+      }
+      
       if (!ordersByProvider[pid]) {
         ordersByProvider[pid] = [];
       }
@@ -3385,7 +3404,10 @@ app.get("/api/orders/:id/track", authenticateToken, async (req: AuthRequest, res
       username: order.username,
       email: order.email,
       logs,
-      providerDetails
+      providerDetails,
+      note: order.note || null,
+      rating: order.rating || null,
+      feedback_comment: order.feedback_comment || null
     });
 
   } catch (error: any) {
@@ -3482,7 +3504,10 @@ app.post("/api/orders/track-lookup", async (req: Request, res: Response) => {
         delivered,
         progress_percent: progressPercent,
         provider_details: providerDetails,
-        method_used: "$api->status()"
+        method_used: "$api->status()",
+        note: order.note || null,
+        rating: order.rating || null,
+        feedback_comment: order.feedback_comment || null
       }
     });
   } catch (error: any) {
@@ -3643,6 +3668,55 @@ app.post("/api/orders/:id/note", authenticateToken, async (req: AuthRequest, res
   
   await pool.query("UPDATE orders SET note = ? WHERE id = ?", [note, orderId]);
   res.json({ success: true });
+});
+
+app.post("/api/orders/:id/feedback", authenticateToken, async (req: AuthRequest, res) => {
+  const orderId = req.params.id;
+  const { rating, comment } = req.body;
+  const userId = req.user?.id;
+  const role = req.user?.role;
+
+  if (!userId) {
+    return res.status(401).json({ success: false, error: "Unauthorized" });
+  }
+
+  const ratingNum = parseInt(String(rating));
+  if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+    return res.status(400).json({ success: false, error: "Please select a star rating between 1 and 5." });
+  }
+
+  const cleanComment = typeof comment === 'string' ? comment.trim() : '';
+
+  // Look up order
+  const [orders]: any = await pool.query(
+    role === 'admin'
+      ? "SELECT id, status, user_id FROM orders WHERE id = ?"
+      : "SELECT id, status, user_id FROM orders WHERE id = ? AND user_id = ?",
+    role === 'admin' ? [orderId] : [orderId, userId]
+  );
+
+  if (!orders || orders.length === 0) {
+    return res.status(404).json({ success: false, error: "Order not found or unauthorized." });
+  }
+
+  const order = orders[0];
+  const cleanStatus = String(order.status || '').toLowerCase();
+  const isCompleted = ['completed', 'success', 'done'].includes(cleanStatus);
+  if (!isCompleted && role !== 'admin') {
+    return res.status(400).json({ success: false, error: "Ratings and feedback can only be submitted for completed orders." });
+  }
+
+  await pool.query(
+    "UPDATE orders SET rating = ?, feedback_comment = ? WHERE id = ?",
+    [ratingNum, cleanComment, orderId]
+  );
+
+  res.json({
+    success: true,
+    message: "Thank you! Your feedback and rating have been recorded.",
+    rating: ratingNum,
+    feedback_comment: cleanComment
+  });
 });
 
 app.post("/api/orders/:id/cancel", authenticateToken, async (req: AuthRequest, res) => {

@@ -3,7 +3,7 @@ import {
   Layout, LayoutDashboard, ShoppingCart, List, History, Wallet, Moon, Sun, Menu, X, Bell, LogOut, 
   ChevronRight, Search, Info, AlertTriangle, Send, MessageCircle, Facebook, Instagram, Youtube, Building, 
   Twitter, Music, MessageSquare, Globe, Play, Users, User as UserIcon, Heart, Eye, Share2, Copy, Check, Headphones, Settings, Trash2, Plus, Edit2, EyeOff, CreditCard, CheckCircle2, Key,
-  Link as LinkIcon, ExternalLink, RefreshCw, HelpCircle, ChevronDown, Clock, Loader2, ShieldAlert, Activity, XCircle, Download, Receipt, Printer, Truck, Inbox, Calendar, Filter, Monitor, Megaphone
+  Link as LinkIcon, ExternalLink, RefreshCw, HelpCircle, ChevronDown, Clock, Loader2, ShieldAlert, Activity, XCircle, Download, Receipt, Printer, Truck, Inbox, Calendar, Filter, Monitor, Megaphone, Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast, { Toaster } from 'react-hot-toast';
@@ -1309,6 +1309,16 @@ export default function App() {
     }
   }, [themeMode]);
 
+  const toggleTheme = () => {
+    const nextMode: ThemeMode = isDarkMode ? 'light' : 'dark';
+    setThemeMode(nextMode);
+    localStorage.setItem('amarboost_theme_mode', nextMode);
+    toast.success(`Theme set to ${nextMode === 'dark' ? 'Dark' : 'Light'} Mode`, {
+      icon: nextMode === 'dark' ? '🌙' : '☀️',
+      duration: 1500
+    });
+  };
+
   useEffect(() => {
     if (user) {
       localStorage.setItem('amarboost_user', JSON.stringify(user));
@@ -1502,6 +1512,18 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Pre-load public services immediately on startup so Service Catalog is instantly populated
+  useEffect(() => {
+    fetch('/api/services')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setServices(data);
+        }
+      })
+      .catch(err => console.warn("Notice: Initial services pre-fetch:", err));
+  }, []);
+
   const fetchData = async () => {
     if (!user || !token) return;
     setApiError(null);
@@ -1544,14 +1566,19 @@ export default function App() {
       const servicesData = await checkJson(servicesRes);
       const ordersData = await checkJson(ordersRes);
 
-      if (!balanceRes.ok || !servicesRes.ok || !ordersRes.ok) {
-        setApiError(balanceData?.error || servicesData?.error || ordersData?.error || "Service temporarily unavailable. Retrying...");
-        return;
+      if (servicesRes.ok && Array.isArray(servicesData) && servicesData.length > 0) {
+        setServices(servicesData);
+      }
+      if (balanceRes.ok && balanceData && balanceData.balance !== undefined) {
+        setBalance(balanceData.balance || 0);
+      }
+      if (ordersRes.ok && Array.isArray(ordersData)) {
+        setOrders(ordersData);
       }
 
-      setBalance(balanceData.balance || 0);
-      setServices(Array.isArray(servicesData) ? servicesData : []);
-      setOrders(Array.isArray(ordersData) ? ordersData : []);
+      if (!servicesRes.ok && !balanceRes.ok && !ordersRes.ok) {
+        setApiError(balanceData?.error || servicesData?.error || ordersData?.error || "Service temporarily unavailable. Retrying...");
+      }
     } catch (error) {
       setApiError("Failed to connect to the server. Retrying shortly...");
     } finally {
@@ -1947,8 +1974,22 @@ function AdsAndGrowthCenter({ user, services, setActiveTab, token }: { user: Use
               </button>
             </div>
 
-              {/* Unified Controls Dropdown */}
-              <div className="relative">
+            {/* Prominent Theme Toggle Button */}
+            <button
+              onClick={toggleTheme}
+              className="p-2 text-slate-700 dark:text-amber-400 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 border border-slate-200/80 dark:border-slate-700/80 rounded-xl transition-all shadow-2xs hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer group"
+              title={`Switch to ${isDarkMode ? 'Light' : 'Dark'} Mode (currently ${isDarkMode ? 'Dark' : 'Light'})`}
+              aria-label="Toggle Theme"
+            >
+              {isDarkMode ? (
+                <Sun size={17} className="transition-transform group-hover:rotate-45 text-amber-400" />
+              ) : (
+                <Moon size={17} className="transition-transform group-hover:-rotate-12 text-indigo-600" />
+              )}
+            </button>
+
+            {/* Unified Controls Dropdown */}
+            <div className="relative">
                 <button
                   onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}
                   className="p-1.5 text-slate-700 dark:text-slate-350 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
@@ -2884,7 +2925,7 @@ function SupportCenter({ user, orders, services, token, onOrderPlaced, setActive
           {activeSupportTab === 'faq' && (
             <div className="space-y-4">
               {faqs.map((f, i) => (
-                <div key={i} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm transition-all hover:shadow-md">
+                <div key={`ticket-${i}`} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm transition-all hover:shadow-md">
                   <div className="p-5">
                     <div className="flex items-center gap-3 mb-2">
                       <div className="w-8 h-8 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 rounded-lg flex items-center justify-center">
@@ -3412,7 +3453,7 @@ function AdminDashboard({ providerInfo, orders, services, token, setActiveTab }:
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         {stats.map((stat, i) => (
-          <div key={i} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+          <div key={`stat-${i}`} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
             <div className="flex items-center gap-2.5">
               <div className={`w-9 h-9 ${stat.bg} ${stat.color} rounded-lg flex items-center justify-center shrink-0`}>
                 <stat.icon size={18} />
@@ -4155,7 +4196,7 @@ function SupportChat({ user, onUpdateUser, token, services, orders, onOrderPlace
               ) : (
                 <div className="flex-1 space-y-3 overflow-y-auto p-1 custom-scrollbar">
                   {chatHistory.map((chat, i) => (
-                    <div key={i} className="space-y-2 animate-fade-in">
+                    <div key={`log-${i}`} className="space-y-2 animate-fade-in">
                       <div className={`flex ${chat.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[85%] p-2.5 rounded-xl text-xs break-words ${
                           chat.role === 'user' 
@@ -4783,7 +4824,7 @@ function Dashboard({ balance, orders, services, setActiveTab, favorites, setFavo
       {/* 2x2 Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 lg:gap-3">
         {stats.map((stat, i) => (
-          <div key={i} className="bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm transition-shadow">
+          <div key={`benefit-${i}`} className="bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm transition-shadow">
             <div className="flex items-center justify-between mb-1.5">
               <div className={`p-1.5 rounded-md ${stat.bg} ${stat.color}`}>
                 <stat.icon size={14} />
@@ -4889,7 +4930,7 @@ function Dashboard({ balance, orders, services, setActiveTab, favorites, setFavo
               { cat: 'Twitter / X', time: '1-6h', icon: <Twitter size={12} /> },
               { cat: 'Telegram', time: '0-1h', icon: <Send size={12} /> }
             ].map((p, idx) => (
-              <div key={idx} className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col items-center text-center group hover:border-indigo-500 transition-all">
+              <div key={p.cat} className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col items-center text-center group hover:border-indigo-500 transition-all">
                 <div className="p-1 bg-slate-50 dark:bg-slate-900 rounded-md text-slate-400 group-hover:text-indigo-600 transition-colors mb-1.5">
                   {p.icon}
                 </div>
@@ -7250,7 +7291,7 @@ export function LiveOrderTrackingModal({ orderId, services, onClose, token, onUp
                     if (isCancelled) dotColor = 'bg-red-500 border-white dark:border-slate-900 ring-4 ring-red-500/15';
 
                     return (
-                      <div key={index} className="relative select-none text-left">
+                      <div key={`log-${index}`} className="relative select-none text-left">
                         {/* Bullet */}
                         <div className={`absolute -left-[23px] top-1 w-3.5 h-3.5 rounded-full border-2 ${dotColor} z-10 transition-all`} />
                         
@@ -7623,6 +7664,8 @@ function OrderReceiptModal({ order, services, onClose }: OrderReceiptModalProps)
 }
 
 function ServicesList({ services, isAdmin, onUpdate, favorites, setFavorites, setActiveTab, setSelectedServiceId, token }: { services: Service[], isAdmin?: boolean, onUpdate?: () => void, favorites: string[], setFavorites: (favs: string[]) => void, setActiveTab: (tab: string) => void, setSelectedServiceId: (id: string) => void, token: string }) {
+  const [localServices, setLocalServices] = useState<Service[]>(services || []);
+  const [isLoadingServices, setIsLoadingServices] = useState<boolean>(!services || services.length === 0);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'default' | 'price-asc' | 'price-desc'>('default');
   const [expandedServiceId, setExpandedServiceId] = useState<string | null>(null);
@@ -7638,6 +7681,31 @@ function ServicesList({ services, isAdmin, onUpdate, favorites, setFavorites, se
   const [syncing, setSyncing] = useState(false);
   const [autoRenewals, setAutoRenewals] = useState<AutoRenewal[]>([]);
   const [configRenewal, setConfigRenewal] = useState<{serviceId: string, link: string, quantity: string} | null>(null);
+
+  // Sync props services or fetch directly if not yet loaded
+  useEffect(() => {
+    if (services && services.length > 0) {
+      setLocalServices(services);
+      setIsLoadingServices(false);
+    } else {
+      setIsLoadingServices(true);
+      fetch('/api/services')
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data) && data.length > 0) {
+            setLocalServices(data);
+          }
+        })
+        .catch(err => console.warn("Notice: Direct services load in ServicesList:", err))
+        .finally(() => setIsLoadingServices(false));
+    }
+  }, [services]);
+
+  const activeServices = localServices.length > 0 ? localServices : (services || []);
+
+  useEffect(() => {
+    setSelectedCategory('All');
+  }, [platform]);
 
   useEffect(() => {
     if (editingService) {
@@ -8170,7 +8238,7 @@ function ServicesList({ services, isAdmin, onUpdate, favorites, setFavorites, se
                               <div className="text-[8px] uppercase font-extrabold text-green-600 dark:text-green-400 tracking-widest mb-1.5">📈 Key Benefits</div>
                               <ul className="space-y-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 list-none pl-0">
                                 {marketing.benefits.map((benefit, i) => (
-                                  <li key={i}>{benefit}</li>
+                                  <li key={`benefit-${i}`} className="text-slate-600 dark:text-slate-300 font-semibold text-[9px] list-none pl-0 leading-snug">{benefit}</li>
                                 ))}
                               </ul>
                             </div>
@@ -8179,7 +8247,7 @@ function ServicesList({ services, isAdmin, onUpdate, favorites, setFavorites, se
                               <div className="text-[8px] uppercase font-extrabold text-amber-600 dark:text-amber-400 tracking-widest mb-1.5">⚠️ Requirements</div>
                               <ul className="space-y-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 list-none pl-0">
                                 {marketing.requirements.map((req, i) => (
-                                  <li key={i}>{req}</li>
+                                  <li key={`req-${i}`} className="text-slate-600 dark:text-slate-300 font-semibold text-[9px] list-none pl-0 leading-snug">{req}</li>
                                 ))}
                               </ul>
                             </div>
@@ -8467,7 +8535,7 @@ function ServicesList({ services, isAdmin, onUpdate, favorites, setFavorites, se
                                       <div className="text-[9px] uppercase font-extrabold text-green-605 dark:text-green-400 tracking-wider mb-2 font-black">📈 Key Service Benefits</div>
                                       <ul className="space-y-2 text-xs font-semibold text-slate-600 dark:text-slate-300 list-none pl-0">
                                         {marketing.benefits.map((benefit, i) => (
-                                          <li key={i}>{benefit}</li>
+                                          <li key={`benefit-${i}`} className="text-slate-600 dark:text-slate-300 font-semibold text-[9px] list-none pl-0 leading-snug">{benefit}</li>
                                         ))}
                                       </ul>
                                     </div>
@@ -8475,7 +8543,7 @@ function ServicesList({ services, isAdmin, onUpdate, favorites, setFavorites, se
                                       <div className="text-[9px] uppercase font-extrabold text-amber-600 dark:text-amber-400 tracking-wider mb-2 font-black">⚠️ Target Requirements & Conditions</div>
                                       <ul className="space-y-2 text-xs font-semibold text-slate-600 dark:text-slate-300 list-none pl-0">
                                         {marketing.requirements.map((req, i) => (
-                                          <li key={i}>{req}</li>
+                                          <li key={`req-${i}`} className="text-slate-600 dark:text-slate-300 font-semibold text-[9px] list-none pl-0 leading-snug">{req}</li>
                                         ))}
                                       </ul>
                                     </div>

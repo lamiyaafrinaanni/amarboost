@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Search, RefreshCw, CheckCircle2, Clock, AlertTriangle, XCircle, MessageCircle,
-  ExternalLink, Copy, Check, ArrowRight, Activity, Zap, Shield, Sparkles, Filter
+  ExternalLink, Copy, Check, ArrowRight, Activity, Zap, Shield, Sparkles, Filter, Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
@@ -20,6 +20,8 @@ interface OrderItem {
   service_name?: string;
   service_category?: string;
   note?: string | null;
+  rating?: number | null;
+  feedback_comment?: string | null;
 }
 
 interface TrackedOrderDetails {
@@ -39,6 +41,8 @@ interface TrackedOrderDetails {
   progress_percent: number;
   method_used?: string;
   note?: string | null;
+  rating?: number | null;
+  feedback_comment?: string | null;
 }
 
 interface OrderTrackerProps {
@@ -66,10 +70,18 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
   const [localOrders, setLocalOrders] = useState<OrderItem[]>(orders);
   const [note, setNote] = useState<string>('');
   const [isSavingNote, setIsSavingNote] = useState<boolean>(false);
+  const [rating, setRating] = useState<number>(5);
+  const [hoverRating, setHoverRating] = useState<number>(0);
+  const [feedbackComment, setFeedbackComment] = useState<string>('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState<boolean>(false);
+  const [isEditingFeedback, setIsEditingFeedback] = useState<boolean>(false);
 
   useEffect(() => {
     if (trackedOrder) {
       setNote(trackedOrder.note || '');
+      setRating(trackedOrder.rating || 5);
+      setFeedbackComment(trackedOrder.feedback_comment || '');
+      setIsEditingFeedback(false);
     }
   }, [trackedOrder]);
 
@@ -95,6 +107,51 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
       toast.error('Error saving note');
     } finally {
       setIsSavingNote(false);
+    }
+  };
+
+  const handleSaveFeedback = async (orderIdToRate?: number) => {
+    const targetId = orderIdToRate || trackedOrder?.id;
+    if (!targetId) return;
+
+    if (!rating || rating < 1 || rating > 5) {
+      toast.error('Please choose a star rating (1 to 5 stars)');
+      return;
+    }
+
+    setIsSubmittingFeedback(true);
+    try {
+      const res = await fetch(`/api/orders/${targetId}/feedback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          rating,
+          comment: feedbackComment
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        toast.success(data.message || 'Feedback submitted successfully!');
+        if (trackedOrder && trackedOrder.id === targetId) {
+          setTrackedOrder(prev => prev ? { ...prev, rating, feedback_comment: feedbackComment } : null);
+        }
+        setLocalOrders(prev => prev.map(o => o.id === targetId ? {
+          ...o,
+          rating,
+          feedback_comment: feedbackComment
+        } : o));
+        setIsEditingFeedback(false);
+        if (onUpdate) onUpdate();
+      } else {
+        toast.error(data.error || 'Failed to submit feedback');
+      }
+    } catch (err: any) {
+      toast.error('Network error submitting feedback');
+    } finally {
+      setIsSubmittingFeedback(false);
     }
   };
 
@@ -519,6 +576,126 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
               </div>
             </div>
 
+            {/* Customer Rating & Feedback for Completed Orders */}
+            {['completed', 'success', 'done'].includes(trackedOrder.status.toLowerCase()) && (
+              <div className="space-y-3 p-4 sm:p-5 rounded-2xl bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-300 flex items-center gap-2">
+                    <Star size={15} className="text-amber-500 fill-amber-500" />
+                    Customer Rating & Structured Feedback
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50">
+                    Completed Order
+                  </span>
+                </div>
+
+                {trackedOrder.rating && !isEditingFeedback ? (
+                  <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-100 dark:border-amber-900/30 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star
+                            key={star}
+                            size={18}
+                            className={star <= (trackedOrder.rating || 0) ? "text-amber-400 fill-amber-400" : "text-slate-300 dark:text-slate-700"}
+                          />
+                        ))}
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 ml-1">
+                          {trackedOrder.rating} / 5 Stars
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRating(trackedOrder.rating || 5);
+                          setFeedbackComment(trackedOrder.feedback_comment || '');
+                          setIsEditingFeedback(true);
+                        }}
+                        className="text-[11px] font-bold text-amber-600 hover:text-amber-700 dark:text-amber-400 hover:underline cursor-pointer"
+                      >
+                        Edit Review
+                      </button>
+                    </div>
+                    {trackedOrder.feedback_comment && (
+                      <p className="text-xs text-slate-600 dark:text-slate-300 italic bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                        "{trackedOrder.feedback_comment}"
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1.5">
+                        How was your delivery experience?
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              key={star}
+                              type="button"
+                              onClick={() => setRating(star)}
+                              onMouseEnter={() => setHoverRating(star)}
+                              onMouseLeave={() => setHoverRating(0)}
+                              className="p-1 rounded-lg hover:scale-110 active:scale-95 transition-all cursor-pointer focus:outline-hidden"
+                              title={`Rate ${star} star${star > 1 ? 's' : ''}`}
+                            >
+                              <Star
+                                size={22}
+                                className={
+                                  star <= (hoverRating || rating)
+                                    ? "text-amber-400 fill-amber-400 transition-colors"
+                                    : "text-slate-300 dark:text-slate-600 transition-colors"
+                                }
+                              />
+                            </button>
+                          ))}
+                        </div>
+                        <span className="text-xs font-bold text-amber-700 dark:text-amber-400 min-w-20">
+                          {(hoverRating || rating) === 5 ? '5 - Excellent!' :
+                           (hoverRating || rating) === 4 ? '4 - Very Good' :
+                           (hoverRating || rating) === 3 ? '3 - Good' :
+                           (hoverRating || rating) === 2 ? '2 - Fair' :
+                           (hoverRating || rating) === 1 ? '1 - Poor' : 'Select Rating'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <textarea
+                        value={feedbackComment}
+                        onChange={(e) => setFeedbackComment(e.target.value)}
+                        placeholder="Leave structured feedback on delivery speed, follower retention, or service quality (optional)..."
+                        rows={2}
+                        className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2">
+                      {isEditingFeedback && (
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingFeedback(false)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleSaveFeedback()}
+                        disabled={isSubmittingFeedback || rating === 0}
+                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-black text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Star size={13} className="fill-slate-950 text-slate-950" />
+                        {isSubmittingFeedback ? 'Saving...' : (trackedOrder.rating ? 'Update Feedback' : 'Submit Feedback')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Target Link Box */}
             <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-xs">
               <div className="min-w-0 flex-1">
@@ -630,11 +807,12 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
                   <th className="py-3 px-3">Start Count</th>
                   <th className="py-3 px-3">Remains</th>
                   <th className="py-3 px-3">Status</th>
+                  <th className="py-3 px-3">Rating & Review</th>
                   <th className="py-3 px-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                {filteredOrders.map(order => {
+                {filteredOrders.map((order, index) => {
                   const service = services.find(s => String(s.service || s.id) === String(order.service_id));
                   const isSelected = selectedOrderIds.includes(order.id);
                   const remainsVal = order.remains !== undefined && order.remains !== null ? String(order.remains) : String(order.quantity);
@@ -642,7 +820,7 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
 
                   return (
                     <tr 
-                      key={order.id}
+                      key={`${order.id}-${index}`}
                       className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors ${
                         isSelected ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''
                       }`}
@@ -680,6 +858,38 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
                       </td>
                       <td className="py-3.5 px-3">
                         {getStatusBadge(order.status)}
+                      </td>
+                      <td className="py-3.5 px-3">
+                        {['completed', 'success', 'done'].includes(String(order.status).toLowerCase()) ? (
+                          order.rating ? (
+                            <div 
+                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200/50 dark:border-amber-900/40 text-[11px] font-bold text-amber-700 dark:text-amber-400 cursor-pointer"
+                              title={order.feedback_comment ? `Feedback: "${order.feedback_comment}"` : `Rated ${order.rating}/5 stars`}
+                              onClick={() => {
+                                setSearchId(String(order.id));
+                                handleTrackById(String(order.id));
+                              }}
+                            >
+                              <Star size={11} className="fill-amber-400 text-amber-400" />
+                              <span>{order.rating}/5</span>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSearchId(String(order.id));
+                                handleTrackById(String(order.id));
+                              }}
+                              className="px-2 py-1 rounded-lg bg-amber-100/70 hover:bg-amber-200/80 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-bold text-[10px] inline-flex items-center gap-1 transition-all cursor-pointer"
+                              title="Rate this completed order"
+                            >
+                              <Star size={10} className="fill-amber-500 text-amber-500" />
+                              <span>Rate Order</span>
+                            </button>
+                          )
+                        ) : (
+                          <span className="text-slate-400 text-[11px] font-mono">-</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-3 text-right">
                         <button
