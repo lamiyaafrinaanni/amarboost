@@ -572,6 +572,48 @@ class JSONDatabasePool {
 
       // 8. SELECT
       if (sqlLower.startsWith("select")) {
+        // Special case: orders joined with users
+        if (sqlLower.includes("from orders") && sqlLower.includes("join users")) {
+          const tableData = this.data.orders || [];
+          const users = this.data.users || [];
+          const userMap = new Map(users.map((u: any) => [u.id, u]));
+
+          const whereMatch = sql.match(/where\s+(.+?)(?:\s+order\s+by|\s+limit|$)/i);
+          const whereClause = whereMatch ? whereMatch[1] : undefined;
+
+          let filtered = tableData.filter((row: any) => {
+            if (!whereClause) return true;
+            const cleanWhere = whereClause.replace(/\bo\./gi, "").replace(/\bu\./gi, "");
+            return this.rowMatchesWhere(row, cleanWhere, params);
+          });
+
+          const orderByMatch = sql.match(/order\s+by\s+(.+?)(?:\s+limit|$)/i);
+          if (orderByMatch) {
+            const desc = orderByMatch[1].toLowerCase().includes("desc");
+            const col = orderByMatch[1].split(" ")[0].trim().replace(/\bo\./gi, "").replace(/`/g, "");
+            filtered.sort((a: any, b: any) => {
+              const valA = a[col];
+              const valB = b[col];
+              if (valA === undefined || valB === undefined) return 0;
+              if (typeof valA === "number" && typeof valB === "number") {
+                return desc ? valB - valA : valA - valB;
+              }
+              return desc ? String(valB).localeCompare(String(valA)) : String(valA).localeCompare(String(valB));
+            });
+          }
+
+          const joined = filtered.map((o: any) => {
+            const u: any = userMap.get(o.user_id);
+            return {
+              ...o,
+              username: u ? u.username : '',
+              email: u ? u.email : ''
+            };
+          });
+
+          return [joined, null];
+        }
+
         const selectMatch = sql.match(/select\s+(.+?)\s+from\s+(\w+)(?:\s+where\s+(.+?))?(?:\s+order\s+by\s+(.+?))?(?:\s+limit\s+(\d+|\?))?$/i);
         if (selectMatch) {
           const selectCols = selectMatch[1];
@@ -1533,7 +1575,12 @@ app.post("/mcp/messages", async (req, res) => {
 app.get("/api/provider/balance", authenticateToken, async (req: AuthRequest, res) => {
   try {
     const balanceData = await smmApi.balance();
-    res.json(balanceData);
+    const raw = balanceData && balanceData.balance !== undefined ? balanceData.balance : 0;
+    const num = typeof raw === 'number' ? raw : parseFloat(String(raw));
+    res.json({
+      ...balanceData,
+      balance: !isNaN(num) ? num : raw
+    });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch balance" });
   }
@@ -3194,26 +3241,44 @@ app.get("/api/orders/:id/track", authenticateToken, async (req: AuthRequest, res
   if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
   try {
-    let orderQuery = `
-      SELECT o.*, u.username, u.email 
-      FROM orders o 
-      LEFT JOIN users u ON o.user_id = u.id 
-      WHERE o.id = ?
-    `;
-    let orderParams: any[] = [id];
-    if (role !== 'admin') {
-      orderQuery = `
-        SELECT o.*, u.username, u.email 
-        FROM orders o 
-        LEFT JOIN users u ON o.user_id = u.id 
-        WHERE o.id = ? AND o.user_id = ?
-      `;
-      orderParams.push(userId);
+    const cleanId = String(id).trim();
+    let order: any = null;
+
+    // First try by internal order id
+    const [ordersById]: any = await pool.query(
+      role === 'admin' 
+        ? "SELECT o.*, u.username, u.email FROM orders o LEFT JOIN users u ON o.user_id = u.id WHERE o.id = ?" 
+        : "SELECT o.*, u.username, u.email FROM orders o LEFT JOIN users u ON o.user_id = u.id WHERE o.id = ? AND o.user_id = ?",
+      role === 'admin' ? [cleanId] : [cleanId, userId]
+    );
+
+    if (ordersById && ordersById.length > 0) {
+      order = ordersById[0];
+    } else {
+      // Fallback: try by provider_order_id
+      const [ordersByProv]: any = await pool.query(
+        role === 'admin'
+          ? "SELECT o.*, u.username, u.email FROM orders o LEFT JOIN users u ON o.user_id = u.id WHERE o.provider_order_id = ?"
+          : "SELECT o.*, u.username, u.email FROM orders o LEFT JOIN users u ON o.user_id = u.id WHERE o.provider_order_id = ? AND o.user_id = ?",
+        role === 'admin' ? [cleanId] : [cleanId, userId]
+      );
+      if (ordersByProv && ordersByProv.length > 0) {
+        order = ordersByProv[0];
+      }
     }
 
-    const [orders]: any = await pool.query(orderQuery, orderParams);
-    const order = orders[0];
     if (!order) return res.status(404).json({ error: "Order not found" });
+
+    // Populate username and email if not present
+    if (!order.username || !order.email) {
+      try {
+        const [userRows]: any = await pool.query("SELECT username, email FROM users WHERE id = ?", [order.user_id]);
+        if (userRows && userRows.length > 0) {
+          order.username = userRows[0].username;
+          order.email = userRows[0].email;
+        }
+      } catch (e) {}
+    }
 
     // Build timeline logs
     const logs = [];

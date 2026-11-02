@@ -145,7 +145,7 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
         setTrackedOrder(null);
       }
     } catch (err: any) {
-      console.error('Error tracking order:', err);
+      console.warn('Notice tracking order:', err?.message || err);
       toast.error('Network error while tracking order status');
     } finally {
       setIsSearching(false);

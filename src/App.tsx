@@ -1330,15 +1330,19 @@ export default function App() {
       const headers = { 'Authorization': `Bearer ${token}` };
       const res = await fetch('/api/balance', { headers });
       if (res.ok) {
-        const data = await res.json();
-        setBalance(data.balance || 0);
-        toast.success(`Success: Balance verified via API! Current balance is ${formatPrice(data.balance || 0)}`);
+        const data = await res.json().catch(() => null);
+        if (data && data.balance !== undefined) {
+          setBalance(data.balance || 0);
+          toast.success(`Success: Balance verified via API! Current balance is ${formatPrice(data.balance || 0)}`);
+        } else {
+          toast.error("Failed to parse balance from server");
+        }
       } else {
         toast.error("Failed to fetch balance from API");
       }
-    } catch (error) {
-      console.error(error);
-      toast.error("Error communicating with balance API");
+    } catch (error: any) {
+      console.warn("Notice: Balance fetch temporary network delay:", error?.message || error);
+      toast.error("Connection error while syncing balance. Please try again.");
     } finally {
       setIsSyncingBalance(false);
     }
@@ -1923,17 +1927,23 @@ function AdsAndGrowthCenter({ user, services, setActiveTab, token }: { user: Use
           
           <div className="flex-1 flex justify-end items-center gap-1.5 lg:gap-3">
             {/* Header Balance Display */}
-            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border transition-all ${dbStatus === 'connected' ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-100 dark:border-indigo-800' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800'}`}>
+            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${dbStatus === 'connected' ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-200/80 dark:border-indigo-800/60 shadow-xs' : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800'}`}>
               <div className={`w-1.5 h-1.5 rounded-full bg-emerald-500 ${dbStatus === 'connected' ? 'animate-pulse' : ''}`} title={`Database: ${dbStatus}`}></div>
-              <Wallet size={12} className={dbStatus === 'connected' ? 'text-indigo-600 dark:text-indigo-400' : 'text-red-500'} />
-              <div className="text-[11px] font-extrabold text-indigo-700 dark:text-amber-400">{formatPrice(balance)}</div>
+              <Wallet size={13} className={dbStatus === 'connected' ? 'text-indigo-600 dark:text-indigo-400' : 'text-red-500'} />
+              <div 
+                onClick={() => setIsAddFundsOpen(true)}
+                className="text-xs sm:text-[13px] font-black tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums cursor-pointer hover:underline decoration-emerald-500/50 underline-offset-2 transition-all"
+                title="Account Balance • Click to Add Funds"
+              >
+                {formatPrice(balance)}
+              </div>
               <button 
                 onClick={handleSyncBalance}
                 disabled={isSyncingBalance}
-                className="p-0.5 -mr-0.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition-all"
+                className="p-1 -mr-0.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-white/60 dark:hover:bg-slate-800 rounded-md transition-all cursor-pointer"
                 title="Sync Balance with API"
               >
-                <RefreshCw size={10} className={isSyncingBalance ? "animate-spin" : ""} />
+                <RefreshCw size={11} className={isSyncingBalance ? "animate-spin text-indigo-600" : ""} />
               </button>
             </div>
 
@@ -7019,14 +7029,17 @@ export function LiveOrderTrackingModal({ orderId, services, onClose, token, onUp
         }
       });
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || `HTTP error ${response.status}`);
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Order tracking returned status ${response.status}`);
       }
-      const resData = await response.json();
+      const resData = await response.json().catch(() => null);
+      if (!resData) {
+        throw new Error("Invalid response received from tracking service");
+      }
       setData(resData);
     } catch (err: any) {
-      console.error("Live tracking fetch failed:", err);
-      setError(err.message || "Failed to load real-time status tracker data.");
+      console.warn("Live tracking info:", err?.message || err);
+      setError(err?.message || "Failed to load real-time status tracker data.");
     } finally {
       setLoading(false);
       setRefreshing(false);
