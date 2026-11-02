@@ -1,0 +1,7 @@
+{
+  "name": "bank",
+  "type": "standard",
+  "is_active": false,
+  "details": "Bank Name: DBBL\nAccount Name: AmarBoost\nAccount Number: 123456789\nBranch: Dhaka",
+  "updated_at": "2026-10-26T09:48:30.496Z"
+}

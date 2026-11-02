@@ -1,0 +1,11 @@
+{
+  "id": 1,
+  "name": "bKash",
+  "payment_type": "personal",
+  "account_number": "01642832777",
+  "qr_code_url": "https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=120&auto=format&fit=crop&q=60",
+  "min_amount": "10.0000",
+  "max_amount": "25000.0000",
+  "is_active": false,
+  "updated_at": "2026-10-26T09:48:30.668Z"
+}

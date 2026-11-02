@@ -1,0 +1,6 @@
+{
+  "name": "AmarBoost Reseller Panel",
+  "description": "A professional SMM reseller panel integrated with amarboost.com API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

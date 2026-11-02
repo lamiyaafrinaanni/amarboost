@@ -1,0 +1,11 @@
+{
+  "id": 3,
+  "name": "Rocket",
+  "payment_type": "personal",
+  "account_number": "01642832777-9",
+  "qr_code_url": null,
+  "min_amount": "10.0000",
+  "max_amount": "25000.0000",
+  "is_active": false,
+  "updated_at": "2026-10-26T09:48:30.669Z"
+}

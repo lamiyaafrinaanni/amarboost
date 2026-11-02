@@ -1,0 +1,11 @@
+{
+  "id": 4,
+  "name": "Bank",
+  "payment_type": "business",
+  "account_number": "123-456-789-000",
+  "qr_code_url": null,
+  "min_amount": "50.0000",
+  "max_amount": "500000.0000",
+  "is_active": false,
+  "updated_at": "2026-10-26T09:48:30.669Z"
+}
